@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: campus-placement-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: campus_placement
+    volumes:
+      - mongodb_data:/data/db
+      - ./data/mongodb-init:/docker-entrypoint-initdb.d
+    networks:
+      - campus-placement
+
+  # Redis (for background jobs)
+  redis:
+    image: redis:7.2-alpine
+    container_name: campus-placement-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - campus-placement
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: campus-placement-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://admin:password123@mongodb:27017/campus_placement?authSource=admin
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_EXPIRE: 7d
+      REDIS_URL: redis://redis:6379
+      PYTHON_AI_SERVICE_URL: http://ai-service:8000
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./backend/uploads:/app/uploads
+    networks:
+      - campus-placement
+
+  # Python AI Service
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: campus-placement-ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHON_ENV: production
+      PORT: 8000
+      MONGODB_URI: mongodb://admin:password123@mongodb:27017/campus_placement?authSource=admin
+      HF_API_TOKEN: your-huggingface-token-here
+      MODEL_MODE: local
+      FAISS_INDEX_PATH: /app/data/faiss_index
+    depends_on:
+      - mongodb
+    volumes:
+      - ./ai-service/data:/app/data
+      - ./ai-service/models:/app/models
+      - ./ai-service/uploads:/app/uploads
+    networks:
+      - campus-placement
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: campus-placement-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:5000/api
+      REACT_APP_AI_SERVICE_URL: http://localhost:8000/api/ai
+    depends_on:
+      - backend
+      - ai-service
+    networks:
+      - campus-placement
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  campus-placement:
+    driver: bridge
+
